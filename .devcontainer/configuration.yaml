@@ -1,0 +1,165 @@
+default_config:
+
+logger:
+  default: info
+  logs:
+    custom_components.awesome_thermostat: debug
+
+# If you need to debug uncommment the line below (doc: https://www.home-assistant.io/integrations/debugpy/)
+debugpy:
+
+input_number:
+  fake_temperature_sensor1:
+    name: Temperature 1
+    min: 0
+    max: 35
+    step: 1
+    icon: mdi:thermometer
+  fake_temperature_sensor2:
+    name: Temperature 2
+    min: 0
+    max: 35
+    step: 1
+    icon: mdi:thermometer
+  fake_temperature_sensor3:
+    name: Temperature 3
+    min: 0
+    max: 35
+    step: 1
+    icon: mdi:thermometer
+  fake_temperature_sensor4:
+    name: Temperature 4
+    min: 0
+    max: 35
+    step: 1
+    icon: mdi:thermometer
+
+
+input_boolean:
+  # input_boolean to simulate the heater entity switch. Only for development environment.
+  fake_heater_switch1:
+    name: Heater 1
+    icon: mdi:heater
+  # input_boolean to simulate the heater entity switch. Only for development environment.
+  fake_heater_switch2:
+    name: Heater 2
+    icon: mdi:heater
+  # input_boolean to simulate the windows entity. Only for development environment.
+  fake_window_sensor2:
+    name: Window 2
+    icon: mdi:window-closed-variant
+  # input_boolean to simulate the heater entity switch. Only for development environment.
+  fake_heater_switch3:
+    name: Heater 3
+    icon: mdi:heater
+  # input_boolean to simulate the motion sensor entity. Only for development environment.
+  fake_motion_sensor3:
+    name: Motion Sensor 3
+    icon: mdi:run
+  # input_boolean to simulate the heater entity switch. Only for development environment.
+  fake_heater_switch4:
+    name: Heater 4
+    icon: mdi:heater
+  # input_boolean to simulate the windows entity. Only for development environment.
+  fake_window_sensor4:
+    name: Window 4
+    icon: mdi:window-closed-variant
+  # input_boolean to simulate the motion sensor entity. Only for development environment.
+  fake_motion_sensor4:
+    name: Motion Sensor 4
+    icon: mdi:run
+
+
+climate:
+  - platform: awesome_thermostat
+    name: "AT1"
+    heater: input_boolean.fake_heater_switch1
+    target_sensor: input_number.fake_temperature_sensor1
+    min_temp: 17
+    max_temp: 23
+    ac_mode: false
+    cold_tolerance: 0.3
+    hot_tolerance: 0.3
+    min_cycle_duration:
+      seconds: 5
+    keep_alive:
+      minutes: 3
+    initial_hvac_mode: "heat"
+    precision: 0.1
+    eco_temp: 18.5
+    away_temp: 16
+    boost_temp: 23
+    comfort_temp: 21.5
+    sleep_temp: 20
+  - platform: awesome_thermostat
+    name: "AT2"
+    heater: input_boolean.fake_heater_switch2
+    target_sensor: input_number.fake_temperature_sensor2
+    window_sensor: binary_sensor.fenetre_simple_bureau_contact
+    min_temp: 17
+    max_temp: 23
+    ac_mode: false
+    cold_tolerance: 0.3
+    hot_tolerance: 0.3
+    min_cycle_duration:
+      seconds: 5
+    keep_alive:
+      minutes: 3
+    initial_hvac_mode: "heat"
+    precision: 0.1
+    eco_temp: 18.5
+    away_temp: 16
+    boost_temp: 23
+    comfort_temp: 21.5
+    sleep_temp: 20
+  - platform: awesome_thermostat
+    name: "AT3"
+    heater: input_boolean.fake_heater_switch3
+    target_sensor: input_number.fake_temperature_sensor3
+    motion_sensor: input_boolean.fake_motion_sensor
+    motion_mode: comfort
+    no_motion_mode: eco
+    motion_delay:
+      seconds: 5
+    min_temp: 17
+    max_temp: 23
+    ac_mode: false
+    cold_tolerance: 0.3
+    hot_tolerance: 0.3
+    min_cycle_duration:
+      seconds: 5
+    keep_alive:
+      minutes: 3
+    initial_hvac_mode: "heat"
+    precision: 0.1
+    eco_temp: 18.5
+    away_temp: 16
+    boost_temp: 23
+    comfort_temp: 21.5
+    sleep_temp: 20
+  - platform: awesome_thermostat
+    name: "AT4"
+    heater: input_boolean.fake_heater_switch4
+    target_sensor: input_number.fake_temperature_sensor4
+    window_sensor: input_boolean.fake_window_sensor4
+    motion_sensor: input_boolean.fake_motion_sensor4
+    motion_mode: comfort
+    no_motion_mode: eco
+    motion_delay:
+      seconds: 5
+    min_temp: 17
+    max_temp: 23
+    ac_mode: false
+    cold_tolerance: 0.3
+    hot_tolerance: 0.3
+    min_cycle_duration:
+      seconds: 5
+    keep_alive:
+      minutes: 3
+    initial_hvac_mode: "heat"
+    precision: 0.1
+    eco_temp: 18.5
+    away_temp: 16
+    boost_temp: 23
+    comfort_temp: 21.5
+    sleep_temp: 20

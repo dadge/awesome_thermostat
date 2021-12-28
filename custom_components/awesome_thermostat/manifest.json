@@ -1,0 +1,15 @@
+{
+  "domain": "awesome_thermostat",
+  "name": "Awesome Thermostat",
+  "documentation": "https://github.com/dadge/awesome_thermostat",
+  "dependencies": [
+    "sensor",
+    "switch"
+  ],
+  "codeowners": [
+    "@dadge"
+  ],
+  "version": "1.0.0",
+  "issue_tracker": "https://github.com/dadge/awesome_thermostat/issues",
+  "iot_class": "local_polling"
+}
