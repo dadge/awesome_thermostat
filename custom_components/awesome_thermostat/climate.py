@@ -97,6 +97,11 @@ CONF_PROPORTIONAL_BIAS = "prop_bias"
 CONF_PROPORTIONAL_FUNCTION = "prop_function"
 # The cycle in minutes
 CONF_PROPORTIONAL_CYCLE_MIN = "prop_cycle_min"
+# The power max management config
+CONF_PMAX_POWER_SENSOR = "power_sensor"
+CONF_PMAX_MAX_POWER_SENSOR = "max_power_sensor"
+CONF_PMAX_DEVICE_POWER = "device_power"
+
 
 ## The proportiional Phases
 # No phases are running
@@ -107,6 +112,7 @@ PROP_PHASE_ON = "On"
 PROP_PHASE_OFF = "Off"
 # The minimal duration in sec a radiateur can be On or Off. Else the radiator stays OFF.
 PROP_MIN_DURATION_SEC = 10
+
 
 SUPPORT_FLAGS = SUPPORT_TARGET_TEMPERATURE
 
@@ -148,6 +154,7 @@ PLATFORM_SCHEMA = PLATFORM_SCHEMA.extend(
         ),
         vol.Optional(CONF_UNIQUE_ID): cv.string,
         vol.Optional(CONF_ALGORITHM, default=ALGO_THRESHOLD): cv.string,
+        # Proportional attributes
         vol.Optional(
             CONF_PROPORTIONAL_BIAS, default=DEFAULT_PROPORTIONAL_BIAS
         ): vol.Coerce(float),
@@ -157,6 +164,10 @@ PLATFORM_SCHEMA = PLATFORM_SCHEMA.extend(
         vol.Optional(
             CONF_PROPORTIONAL_CYCLE_MIN, default=DEFAULT_PROPORTIONAL_CYCLE_MIN
         ): vol.Coerce(float),
+        # Power max management attributes
+        vol.Optional(CONF_PMAX_MAX_POWER_SENSOR): cv.entity_id,
+        vol.Optional(CONF_PMAX_POWER_SENSOR): cv.entity_id,
+        vol.Optional(CONF_PMAX_DEVICE_POWER): vol.Coerce(float),
     }
 ).extend({vol.Optional(v): vol.Coerce(float) for (k, v) in CONF_PRESETS.items()})
 
@@ -194,6 +205,9 @@ async def async_setup_platform(hass, config, async_add_entities, discovery_info=
     prop_bias = config.get(CONF_PROPORTIONAL_BIAS)
     prop_function = config.get(CONF_PROPORTIONAL_FUNCTION)
     prop_cycle_min = config.get(CONF_PROPORTIONAL_CYCLE_MIN)
+    pmax_max_power_sensor_entity_id = config.get(CONF_PMAX_MAX_POWER_SENSOR)
+    pmax_power_sensor_entity_id = config.get(CONF_PMAX_POWER_SENSOR)
+    pmax_device_power = config.get(CONF_PMAX_DEVICE_POWER)
 
     async_add_entities(
         [
@@ -223,6 +237,9 @@ async def async_setup_platform(hass, config, async_add_entities, discovery_info=
                 prop_bias,
                 prop_function,
                 prop_cycle_min,
+                pmax_max_power_sensor_entity_id,
+                pmax_power_sensor_entity_id,
+                pmax_device_power,
             )
         ]
     )
@@ -258,6 +275,9 @@ class AwesomeThermostat(ClimateEntity, RestoreEntity):
         prop_bias,
         prop_function,
         prop_cycle_min,
+        pmax_max_power_sensor_entity_id,
+        pmax_power_sensor_entity_id,
+        pmax_device_power,
     ):
         """Initialize the thermostat."""
         self._name = name
@@ -327,6 +347,19 @@ class AwesomeThermostat(ClimateEntity, RestoreEntity):
                 self.prop_function,
                 self.prop_cycle_min,
             )
+        self.pmax_max_power_sensor_entity_id = pmax_max_power_sensor_entity_id
+        self.pmax_power_sensor_entity_id = pmax_power_sensor_entity_id
+        self.pmax_device_power = pmax_device_power
+        if (
+            self.pmax_max_power_sensor_entity_id
+            and self.pmax_power_sensor_entity_id
+            and self.pmax_device_power
+        ):
+            self._pmax_on = True
+            self._current_power = -1
+            self._current_power_max = -1
+        else:
+            self._pmax_on = False
 
     async def async_added_to_hass(self):
         """Run when entity about to be added."""
@@ -363,6 +396,24 @@ class AwesomeThermostat(ClimateEntity, RestoreEntity):
                 )
             )
 
+        if self.pmax_max_power_sensor_entity_id:
+            self.async_on_remove(
+                async_track_state_change_event(
+                    self.hass,
+                    [self.pmax_max_power_sensor_entity_id],
+                    self._async_pmax_max_power_changed,
+                )
+            )
+
+        if self.pmax_power_sensor_entity_id:
+            self.async_on_remove(
+                async_track_state_change_event(
+                    self.hass,
+                    [self.pmax_power_sensor_entity_id],
+                    self._async_pmax_power_changed,
+                )
+            )
+
         @callback
         def _async_startup(*_):
             """Init on startup."""
@@ -379,6 +430,36 @@ class AwesomeThermostat(ClimateEntity, RestoreEntity):
                 STATE_UNKNOWN,
             ):
                 self.hass.create_task(self._check_switch_initial_state())
+
+            if self._pmax_on:
+                # try to acquire current power and power max
+                current_power_state = self.hass.states.get(
+                    self.pmax_power_sensor_entity_id
+                )
+                if current_power_state and current_power_state.state not in (
+                    STATE_UNAVAILABLE,
+                    STATE_UNKNOWN,
+                ):
+                    self._current_power = float(current_power_state.state)
+                    _LOGGER.debug(
+                        "Current power have been retrieved: %f", self._current_power
+                    )
+                    self.async_write_ha_state()
+                current_power_max_state = self.hass.states.get(
+                    self.pmax_max_power_sensor_entity_id
+                )
+                if current_power_max_state and current_power_max_state.state not in (
+                    STATE_UNAVAILABLE,
+                    STATE_UNKNOWN,
+                ):
+                    self._current_power_max = float(current_power_max_state.state)
+                    _LOGGER.debug(
+                        "Current power max have been retrieved: %f",
+                        self._current_power_max,
+                    )
+                    self.async_write_ha_state()
+
+            self.hass.create_task(self._async_control_heating())
 
         if self.hass.state == CoreState.running:
             _async_startup()
@@ -501,6 +582,7 @@ class AwesomeThermostat(ClimateEntity, RestoreEntity):
             await self._async_control_heating(force=True)
         elif hvac_mode == HVAC_MODE_OFF:
             self._hvac_mode = HVAC_MODE_OFF
+            self.prop_current_phase = PROP_PHASE_NONE
             if self._is_device_active:
                 await self._async_heater_turn_off()
         else:
@@ -537,6 +619,7 @@ class AwesomeThermostat(ClimateEntity, RestoreEntity):
         # Get default temp from super class
         return super().max_temp
 
+    @callback
     async def _async_temperature_changed(self, event):
         """Handle temperature changes."""
         new_state = event.data.get("new_state")
@@ -547,6 +630,7 @@ class AwesomeThermostat(ClimateEntity, RestoreEntity):
         await self._async_control_heating()
         self.async_write_ha_state()
 
+    @callback
     async def _async_windows_changed(self, event):
         """Handle window changes."""
         new_state = event.data.get("new_state")
@@ -563,6 +647,7 @@ class AwesomeThermostat(ClimateEntity, RestoreEntity):
         else:
             return
 
+    @callback
     async def _async_motion_changed(self, event):
         """Handle motion changes."""
         _LOGGER.info(
@@ -603,6 +688,7 @@ class AwesomeThermostat(ClimateEntity, RestoreEntity):
 
                 async_call_later(self.hass, self.motion_delay, try_no_motion_condition)
 
+    @callback
     async def _check_switch_initial_state(self):
         """Prevent the device from keep running if HVAC_MODE_OFF."""
         if self._hvac_mode == HVAC_MODE_OFF and self._is_device_active:
@@ -632,7 +718,50 @@ class AwesomeThermostat(ClimateEntity, RestoreEntity):
                 raise ValueError(f"Sensor has illegal state {state.state}")
             self._cur_temp = cur_temp
         except ValueError as ex:
-            _LOGGER.error("Unable to update from sensor: %s", ex)
+            _LOGGER.error("Unable to update temperature from sensor: %s", ex)
+
+    @callback
+    async def _async_pmax_power_changed(self, event):
+        """Handle power changes."""
+        _LOGGER.debug("Thermostat %s - Receive new Power event", self.name)
+        _LOGGER.debug(event)
+        new_state = event.data.get("new_state")
+        old_state = event.data.get("old_state")
+        if new_state is None or new_state.state == old_state.state:
+            return
+
+        try:
+            current_power = float(new_state.state)
+            if math.isnan(current_power) or math.isinf(current_power):
+                raise ValueError(f"Sensor has illegal state {new_state.state}")
+            self._current_power = current_power
+
+        except ValueError as ex:
+            _LOGGER.error("Unable to update current_power from sensor: %s", ex)
+        # To avoid starting all heaters at the same time we don't force and we wait for next cycle
+        # await self._async_control_heating(force=False)
+        # self.async_write_ha_state()
+
+    async def _async_pmax_max_power_changed(self, event):
+        """Handle power max changes."""
+        _LOGGER.debug("Thermostat %s - Receive new Power Max event", self.name)
+        _LOGGER.debug(event)
+        new_state = event.data.get("new_state")
+        old_state = event.data.get("old_state")
+        if new_state is None or new_state.state == old_state.state:
+            return
+
+        try:
+            current_power_max = float(new_state.state)
+            if math.isnan(current_power_max) or math.isinf(current_power_max):
+                raise ValueError(f"Sensor has illegal state {new_state.state}")
+            self._current_power_max = current_power_max
+
+        except ValueError as ex:
+            _LOGGER.error("Unable to update current_power from sensor: %s", ex)
+        # To avoid starting all heaters at the same time we don't force and we wait for next cycle
+        # await self._async_control_heating(force=False)
+        # self.async_write_ha_state()
 
     async def _async_control_heating(self, time=None, force=False):
         """Check if we need to turn heating on or off."""
@@ -643,8 +772,9 @@ class AwesomeThermostat(ClimateEntity, RestoreEntity):
             ):
                 self._active = True
                 _LOGGER.info(
-                    "Obtained current and target temperature. "
+                    "Thermostat %s - Obtained current and target temperature. "
                     "Awesome thermostat active. %s, %s",
+                    self.name,
                     self._cur_temp,
                     self._target_temp,
                 )
@@ -681,13 +811,40 @@ class AwesomeThermostat(ClimateEntity, RestoreEntity):
             elif self.algorithm == ALGO_PROPROTIONAL:
                 await self._async_control_heating_proportional(time, force)
 
+    def check_power_exceeded(self):
+        power_exceeded = False
+        if (
+            self._pmax_on
+            and self._current_power != -1
+            and self._current_power_max != -1
+        ):
+            _LOGGER.debug(
+                "Thermostat %s - Power management is on. current_power: %f, power_max=%f, heater_power=%f",
+                self.name,
+                self._current_power,
+                self._current_power_max,
+                self.pmax_device_power,
+            )
+            if self._current_power + self.pmax_device_power >= self._current_power_max:
+                _LOGGER.warning(
+                    "Thermostat %s - Max power will be exceeded. No heating period calculated",
+                    self.name,
+                )
+                power_exceeded = True
+        return power_exceeded
+
     async def _async_control_heating_threshold(self, time, force):
         """Handle control heating in Threshold mode"""
         _LOGGER.debug("Threshold mode")
+        power_exceeded = self.check_power_exceeded()
         too_cold = self._target_temp >= self._cur_temp + self._cold_tolerance
         too_hot = self._cur_temp >= self._target_temp + self._hot_tolerance
         if self._is_device_active:
-            if (self.ac_mode and too_cold) or (not self.ac_mode and too_hot):
+            if (
+                (self.ac_mode and too_cold)
+                or (not self.ac_mode and too_hot)
+                or power_exceeded
+            ):
                 _LOGGER.info("Turning off heater %s", self.heater_entity_id)
                 await self._async_heater_turn_off()
             elif time is not None:
@@ -699,7 +856,9 @@ class AwesomeThermostat(ClimateEntity, RestoreEntity):
                 )
                 await self._async_heater_turn_on()
         else:
-            if (self.ac_mode and too_hot) or (not self.ac_mode and too_cold):
+            if not power_exceeded and (
+                (self.ac_mode and too_hot) or (not self.ac_mode and too_cold)
+            ):
                 _LOGGER.info("Turning on heater %s", self.heater_entity_id)
                 await self._async_heater_turn_on()
             elif time is not None:
@@ -714,24 +873,30 @@ class AwesomeThermostat(ClimateEntity, RestoreEntity):
     def calculate_proportional(self):
         """Calculate the proportional parameters value (for Proportional algorithm"""
         _LOGGER.debug("Calculate proportional parameters")
-        delta_temp = self._target_temp - self._cur_temp
-        if self.prop_function == PROPORTIONAL_FUNCTION_LINEAR:
-            on_percent = 0.25 * delta_temp + self.prop_bias
-        elif self.prop_function == PROPORTIONAL_FUNCTION_ATAN:
-            on_percent = math.atan(delta_temp + self.prop_bias) / 1.4
+        power_exceeded = self.check_power_exceeded()
+
+        if not power_exceeded:
+            delta_temp = self._target_temp - self._cur_temp
+            if self.prop_function == PROPORTIONAL_FUNCTION_LINEAR:
+                on_percent = 0.25 * delta_temp + self.prop_bias
+            elif self.prop_function == PROPORTIONAL_FUNCTION_ATAN:
+                on_percent = math.atan(delta_temp + self.prop_bias) / 1.4
+            else:
+                _LOGGER.warning(
+                    "Thermostat %s - Proportional algorithm: unknown %s function. Heating is disabled",
+                    self.name,
+                    self.prop_function,
+                )
+                on_percent = 0
         else:
-            _LOGGER.warning(
-                "Thermostat %s - Proportional algorithm: unknown %s function. Heating is disabled",
-                self.name,
-                self.prop_function,
-            )
             on_percent = 0
+
         # calculated on_time duration in seconds
         if on_percent > 1:
             on_percent = 1
         self.prop_on_time_sec = on_percent * self.prop_cycle_min * 60
 
-        # Do not heat for less than 30 sec
+        # Do not heat for less than xx sec
         if self.prop_on_time_sec < PROP_MIN_DURATION_SEC:
             _LOGGER.info(
                 "Thermostat %s - no heating period due to heating period too small (%f < %f)",
@@ -761,9 +926,9 @@ class AwesomeThermostat(ClimateEntity, RestoreEntity):
         )
 
         # Remove timezone of time if any to be able to compare
-        #if time:
+        # if time:
         #    keep_alive = True
-        #else:
+        # else:
         #    keep_alive = False
 
         async def start_off_cycle(_):
@@ -814,9 +979,7 @@ class AwesomeThermostat(ClimateEntity, RestoreEntity):
             )
 
         async def start_cycle(_):
-            _LOGGER.debug(
-                "Thermostat %s - Into start_cycle", self.name
-            )
+            _LOGGER.debug("Thermostat %s - Into start_cycle", self.name)
 
             time = datetime.now(utc)
 
@@ -848,6 +1011,8 @@ class AwesomeThermostat(ClimateEntity, RestoreEntity):
                 self.calculate_proportional()
                 if self.prop_on_time_sec > 0:
                     await start_on_cycle(None)
+                else:
+                    await start_off_cycle(None)
             else:
                 _LOGGER.debug(
                     "Thermostat %s - nothing to do. Waiting %s",
