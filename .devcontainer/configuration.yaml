@@ -72,71 +72,101 @@ input_boolean:
 
 climate:
   - platform: awesome_thermostat
-    name: "AT1"
+    name: "JMC1"
     heater: input_boolean.fake_heater_switch1
     target_sensor: input_number.fake_temperature_sensor1
+    motion_sensor: input_boolean.fake_motion_sensor3
     min_temp: 17
-    max_temp: 23
+    max_temp: 25
     ac_mode: false
-    cold_tolerance: 0.3
-    hot_tolerance: 0.3
-    min_cycle_duration:
-      seconds: 5
+    # cold_tolerance: 0.3
+    # hot_tolerance: 0.3
+    #min_cycle_duration:
+    #  seconds: 5
     keep_alive:
-      minutes: 3
-    initial_hvac_mode: "heat"
+      minutes: 1
+    initial_hvac_mode: "off"
     precision: 0.1
     eco_temp: 18.5
     away_temp: 16
     boost_temp: 23
     comfort_temp: 21.5
     sleep_temp: 20
-  - platform: awesome_thermostat
-    name: "AT2"
-    heater: input_boolean.fake_heater_switch2
-    target_sensor: input_number.fake_temperature_sensor2
-    window_sensor: binary_sensor.fenetre_simple_bureau_contact
-    min_temp: 17
-    max_temp: 23
-    ac_mode: false
-    cold_tolerance: 0.3
-    hot_tolerance: 0.3
-    min_cycle_duration:
-      seconds: 5
-    keep_alive:
-      minutes: 3
-    initial_hvac_mode: "heat"
-    precision: 0.1
-    eco_temp: 18.5
-    away_temp: 16
-    boost_temp: 23
-    comfort_temp: 21.5
-    sleep_temp: 20
-  - platform: awesome_thermostat
-    name: "AT3"
-    heater: input_boolean.fake_heater_switch3
-    target_sensor: input_number.fake_temperature_sensor3
-    motion_sensor: input_boolean.fake_motion_sensor
+    algorithm: "Proportional"
+    prop_bias: 0.3
+    prop_function: "Atan"
+    prop_cycle_min: 1
+    window_sensor: input_boolean.fake_window_sensor2
     motion_mode: comfort
     no_motion_mode: eco
     motion_delay:
       seconds: 5
-    min_temp: 17
-    max_temp: 23
-    ac_mode: false
-    cold_tolerance: 0.3
-    hot_tolerance: 0.3
-    min_cycle_duration:
-      seconds: 5
-    keep_alive:
-      minutes: 3
-    initial_hvac_mode: "heat"
-    precision: 0.1
-    eco_temp: 18.5
-    away_temp: 16
-    boost_temp: 23
-    comfort_temp: 21.5
-    sleep_temp: 20
+#  - platform: awesome_thermostat
+#    name: "AT1"
+#    heater: input_boolean.fake_heater_switch1
+#    target_sensor: input_number.fake_temperature_sensor1
+#    min_temp: 17
+#    max_temp: 23
+#    ac_mode: false
+#    cold_tolerance: 0.3
+#    hot_tolerance: 0.3
+#    min_cycle_duration:
+#      seconds: 5
+#    keep_alive:
+#      minutes: 3
+#    initial_hvac_mode: "heat"
+#    precision: 0.1
+#    eco_temp: 18.5
+#    away_temp: 16
+#    boost_temp: 23
+#    comfort_temp: 21.5
+#    sleep_temp: 20
+#  - platform: awesome_thermostat
+#    name: "AT2"
+#    heater: input_boolean.fake_heater_switch2
+#    target_sensor: input_number.fake_temperature_sensor2
+#    window_sensor: binary_sensor.fenetre_simple_bureau_contact
+#    min_temp: 17
+#    max_temp: 23
+#    ac_mode: false
+#    cold_tolerance: 0.3
+#    hot_tolerance: 0.3
+#    min_cycle_duration:
+#      seconds: 5
+#    keep_alive:
+#      minutes: 3
+#    initial_hvac_mode: "heat"
+#    precision: 0.1
+#    eco_temp: 18.5
+#    away_temp: 16
+#    boost_temp: 23
+#    comfort_temp: 21.5
+#    sleep_temp: 20
+#  - platform: awesome_thermostat
+#    name: "AT3"
+#    heater: input_boolean.fake_heater_switch3
+#    target_sensor: input_number.fake_temperature_sensor3
+#    motion_sensor: input_boolean.fake_motion_sensor
+#    motion_mode: comfort
+#    no_motion_mode: eco
+#    motion_delay:
+#      seconds: 5
+#    min_temp: 17
+#    max_temp: 23
+#    ac_mode: false
+#    cold_tolerance: 0.3
+#    hot_tolerance: 0.3
+#    min_cycle_duration:
+#      seconds: 5
+#    keep_alive:
+#      minutes: 3
+#    initial_hvac_mode: "heat"
+#    precision: 0.1
+#    eco_temp: 18.5
+#    away_temp: 16
+#    boost_temp: 23
+#    comfort_temp: 21.5
+#    sleep_temp: 20
   - platform: awesome_thermostat
     name: "AT4"
     heater: input_boolean.fake_heater_switch4

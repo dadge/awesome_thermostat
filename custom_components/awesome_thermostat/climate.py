@@ -2,6 +2,8 @@
 import asyncio
 import logging
 import math
+from datetime import datetime, timedelta
+from pytz import UTC as utc
 
 import voluptuous as vol
 
@@ -61,6 +63,14 @@ _LOGGER = logging.getLogger(__name__)
 
 DEFAULT_TOLERANCE = 0.3
 DEFAULT_NAME = "Awesome Thermostat"
+DEFAULT_PROPORTIONAL_BIAS = 0.25
+DEFAULT_PROPORTIONAL_CYCLE_MIN = 5
+
+ALGO_THRESHOLD = "Threshold"
+ALGO_PROPROTIONAL = "Proportional"
+
+PROPORTIONAL_FUNCTION_LINEAR = "Linear"
+PROPORTIONAL_FUNCTION_ATAN = "Atan"
 
 CONF_HEATER = "heater"
 CONF_SENSOR = "target_sensor"
@@ -79,7 +89,24 @@ CONF_HOT_TOLERANCE = "hot_tolerance"
 CONF_KEEP_ALIVE = "keep_alive"
 CONF_INITIAL_HVAC_MODE = "initial_hvac_mode"
 CONF_PRECISION = "precision"
+CONF_ALGORITHM = "algorithm"
+## For PROPOTIONAL ALGO ONLY
+# The bias in calculation
+CONF_PROPORTIONAL_BIAS = "prop_bias"
+# The function used to convert delta temp to percentage
+CONF_PROPORTIONAL_FUNCTION = "prop_function"
+# The cycle in minutes
+CONF_PROPORTIONAL_CYCLE_MIN = "prop_cycle_min"
 
+## The proportiional Phases
+# No phases are running
+PROP_PHASE_NONE = "None"
+# The radiator (or hvac) is ON and is waiting for the end of the ON cycle
+PROP_PHASE_ON = "On"
+# The radiator (or hvac) is OFF and is waiting for the end of the OFF cycle
+PROP_PHASE_OFF = "Off"
+# The minimal duration in sec a radiateur can be On or Off. Else the radiator stays OFF.
+PROP_MIN_DURATION_SEC = 10
 
 SUPPORT_FLAGS = SUPPORT_TARGET_TEMPERATURE
 
@@ -120,6 +147,16 @@ PLATFORM_SCHEMA = PLATFORM_SCHEMA.extend(
             [PRECISION_TENTHS, PRECISION_HALVES, PRECISION_WHOLE]
         ),
         vol.Optional(CONF_UNIQUE_ID): cv.string,
+        vol.Optional(CONF_ALGORITHM, default=ALGO_THRESHOLD): cv.string,
+        vol.Optional(
+            CONF_PROPORTIONAL_BIAS, default=DEFAULT_PROPORTIONAL_BIAS
+        ): vol.Coerce(float),
+        vol.Optional(
+            CONF_PROPORTIONAL_FUNCTION, default=PROPORTIONAL_FUNCTION_LINEAR
+        ): cv.string,
+        vol.Optional(
+            CONF_PROPORTIONAL_CYCLE_MIN, default=DEFAULT_PROPORTIONAL_CYCLE_MIN
+        ): vol.Coerce(float),
     }
 ).extend({vol.Optional(v): vol.Coerce(float) for (k, v) in CONF_PRESETS.items()})
 
@@ -153,6 +190,10 @@ async def async_setup_platform(hass, config, async_add_entities, discovery_info=
     precision = config.get(CONF_PRECISION)
     unit = hass.config.units.temperature_unit
     unique_id = config.get(CONF_UNIQUE_ID)
+    algorithm = config.get(CONF_ALGORITHM)
+    prop_bias = config.get(CONF_PROPORTIONAL_BIAS)
+    prop_function = config.get(CONF_PROPORTIONAL_FUNCTION)
+    prop_cycle_min = config.get(CONF_PROPORTIONAL_CYCLE_MIN)
 
     async_add_entities(
         [
@@ -178,6 +219,10 @@ async def async_setup_platform(hass, config, async_add_entities, discovery_info=
                 precision,
                 unit,
                 unique_id,
+                algorithm,
+                prop_bias,
+                prop_function,
+                prop_cycle_min,
             )
         ]
     )
@@ -209,6 +254,10 @@ class AwesomeThermostat(ClimateEntity, RestoreEntity):
         precision,
         unit,
         unique_id,
+        algorithm,
+        prop_bias,
+        prop_function,
+        prop_cycle_min,
     ):
         """Initialize the thermostat."""
         self._name = name
@@ -259,6 +308,25 @@ class AwesomeThermostat(ClimateEntity, RestoreEntity):
         else:
             self._attr_preset_modes = [PRESET_NONE]
         self._presets = presets
+
+        self.algorithm = algorithm
+        self.prop_bias = prop_bias
+        self.prop_function = prop_function
+        self.prop_cycle_min = prop_cycle_min
+        if self.algorithm == ALGO_PROPROTIONAL:
+            self.prop_current_phase = PROP_PHASE_NONE
+            self.prop_end_phase_time = None
+            self.prop_on_time_sec = None
+            self.prop_off_time_sec = None
+
+            _LOGGER.info(
+                "Used algorithm for %s is %s with bias %f, function %s and cycle %f minutes",
+                self._name,
+                self.algorithm,
+                self.prop_bias,
+                self.prop_function,
+                self.prop_cycle_min,
+            )
 
     async def async_added_to_hass(self):
         """Run when entity about to be added."""
@@ -424,6 +492,7 @@ class AwesomeThermostat(ClimateEntity, RestoreEntity):
 
     async def async_set_hvac_mode(self, hvac_mode):
         """Set hvac mode."""
+        _LOGGER.error("Thermostat %s - Set hvac mode: %s", self.name, hvac_mode)
         if hvac_mode == HVAC_MODE_HEAT:
             self._hvac_mode = HVAC_MODE_HEAT
             await self._async_control_heating(force=True)
@@ -496,6 +565,12 @@ class AwesomeThermostat(ClimateEntity, RestoreEntity):
 
     async def _async_motion_changed(self, event):
         """Handle motion changes."""
+        _LOGGER.info(
+            "Motion changed. Event.new_state is %s, _attr_preset_mode=%s, activity=%s",
+            event.data.get("new_state"),
+            self._attr_preset_mode,
+            PRESET_ACTIVITY,
+        )
         if self._attr_preset_mode != PRESET_ACTIVITY:
             return
         new_state = event.data.get("new_state")
@@ -575,6 +650,7 @@ class AwesomeThermostat(ClimateEntity, RestoreEntity):
                 )
 
             if not self._active or self._hvac_mode == HVAC_MODE_OFF:
+                _LOGGER.info("Thermostat %s - Mode is OFF or inactive", self.name)
                 return
 
             # If the `force` argument is True, we
@@ -599,29 +675,187 @@ class AwesomeThermostat(ClimateEntity, RestoreEntity):
                 if not long_enough:
                     return
 
-            too_cold = self._target_temp >= self._cur_temp + self._cold_tolerance
-            too_hot = self._cur_temp >= self._target_temp + self._hot_tolerance
-            if self._is_device_active:
-                if (self.ac_mode and too_cold) or (not self.ac_mode and too_hot):
-                    _LOGGER.info("Turning off heater %s", self.heater_entity_id)
-                    await self._async_heater_turn_off()
-                elif time is not None:
-                    # The time argument is passed only in keep-alive case
-                    _LOGGER.info(
-                        "Keep-alive - Turning on heater heater %s",
-                        self.heater_entity_id,
-                    )
-                    await self._async_heater_turn_on()
+            if self.algorithm == ALGO_THRESHOLD:
+                await self._async_control_heating_threshold(time, force)
+
+            elif self.algorithm == ALGO_PROPROTIONAL:
+                await self._async_control_heating_proportional(time, force)
+
+    async def _async_control_heating_threshold(self, time, force):
+        """Handle control heating in Threshold mode"""
+        _LOGGER.debug("Threshold mode")
+        too_cold = self._target_temp >= self._cur_temp + self._cold_tolerance
+        too_hot = self._cur_temp >= self._target_temp + self._hot_tolerance
+        if self._is_device_active:
+            if (self.ac_mode and too_cold) or (not self.ac_mode and too_hot):
+                _LOGGER.info("Turning off heater %s", self.heater_entity_id)
+                await self._async_heater_turn_off()
+            elif time is not None:
+                # The time argument is passed only in keep-alive case
+                _LOGGER.info(
+                    "Keep-alive - Thermostat %s - Turning on heater heater %s",
+                    self.name,
+                    self.heater_entity_id,
+                )
+                await self._async_heater_turn_on()
+        else:
+            if (self.ac_mode and too_hot) or (not self.ac_mode and too_cold):
+                _LOGGER.info("Turning on heater %s", self.heater_entity_id)
+                await self._async_heater_turn_on()
+            elif time is not None:
+                # The time argument is passed only in keep-alive case
+                _LOGGER.info(
+                    "Keep-alive - Thermostat %s - Turning off heater %s",
+                    self.name,
+                    self.heater_entity_id,
+                )
+                await self._async_heater_turn_off()
+
+    def calculate_proportional(self):
+        """Calculate the proportional parameters value (for Proportional algorithm"""
+        _LOGGER.debug("Calculate proportional parameters")
+        delta_temp = self._target_temp - self._cur_temp
+        if self.prop_function == PROPORTIONAL_FUNCTION_LINEAR:
+            on_percent = 0.25 * delta_temp + self.prop_bias
+        elif self.prop_function == PROPORTIONAL_FUNCTION_ATAN:
+            on_percent = math.atan(delta_temp + self.prop_bias) / 1.4
+        else:
+            _LOGGER.warning(
+                "Thermostat %s - Proportional algorithm: unknown %s function. Heating is disabled",
+                self.name,
+                self.prop_function,
+            )
+            on_percent = 0
+        # calculated on_time duration in seconds
+        if on_percent > 1:
+            on_percent = 1
+        self.prop_on_time_sec = on_percent * self.prop_cycle_min * 60
+
+        # Do not heat for less than 30 sec
+        if self.prop_on_time_sec < PROP_MIN_DURATION_SEC:
+            _LOGGER.info(
+                "Thermostat %s - no heating period due to heating period too small (%f < %f)",
+                self.name,
+                self.prop_on_time_sec,
+                PROP_MIN_DURATION_SEC,
+            )
+            self.prop_on_time_sec = 0
+
+        self.prop_off_time_sec = (1.0 - on_percent) * self.prop_cycle_min * 60
+        _LOGGER.debug(
+            "Proportional algorithm: heating percent calculated is %f, on_time is %f (sec), off_time is %s (sec)",
+            on_percent,
+            self.prop_on_time_sec,
+            self.prop_off_time_sec,
+        )
+
+    async def _async_control_heating_proportional(self, time, force):
+        """Handle control heating in Proportional mode"""
+
+        _LOGGER.debug(
+            "Thermostat %s - Proportional mode. Current phase is %s, time is %s, force is %s",
+            self.name,
+            self.prop_current_phase,
+            time,
+            force,
+        )
+
+        # Remove timezone of time if any to be able to compare
+        #if time:
+        #    keep_alive = True
+        #else:
+        #    keep_alive = False
+
+        async def start_off_cycle(_):
+            """Local function to start the Off cycle"""
+            _LOGGER.debug("Thermostat %s - Into start_off_cycle", self.name)
+            now = datetime.now(utc)
+
+            await self._async_heater_turn_off()
+            self.prop_current_phase = PROP_PHASE_OFF
+
+            self.prop_end_phase_time = now + timedelta(seconds=self.prop_off_time_sec)
+            _LOGGER.info(
+                "Thermostat %s - End of heating period for %f sec until %s (phase=%s)",
+                self.name,
+                self.prop_off_time_sec,
+                self.prop_end_phase_time,
+                self.prop_current_phase,
+            )
+
+            async_call_later(
+                self.hass,
+                self.prop_off_time_sec,
+                start_cycle,
+            )
+
+        async def start_on_cycle(_):
+            """Local function to start the On cycle"""
+            _LOGGER.debug("Thermostat %s - Into start_on_cycle", self.name)
+
+            now = datetime.now(utc)
+
+            await self._async_heater_turn_on()
+            self.prop_current_phase = PROP_PHASE_ON
+
+            self.prop_end_phase_time = now + timedelta(seconds=self.prop_on_time_sec)
+            _LOGGER.info(
+                "Thermostat %s - Start of heating period for %f sec until %s (phase=%s)",
+                self.name,
+                self.prop_on_time_sec,
+                self.prop_end_phase_time,
+                self.prop_current_phase,
+            )
+
+            async_call_later(
+                self.hass,
+                self.prop_on_time_sec,
+                start_cycle,
+            )
+
+        async def start_cycle(_):
+            _LOGGER.debug(
+                "Thermostat %s - Into start_cycle", self.name
+            )
+
+            time = datetime.now(utc)
+
+            if self.prop_current_phase == PROP_PHASE_NONE:
+                _LOGGER.debug("Into PHASE_NONE or force")
+                self.calculate_proportional()
+                # Do not heat for less than 30 sec
+                if self.prop_on_time_sec <= 0:
+                    if self._is_device_active:
+                        _LOGGER.info("Thermostat %s - Stopping radiator", self.name)
+                        await self._async_heater_turn_off()
+                    else:
+                        _LOGGER.debug("Radiator is not active. Nothing to do")
+                else:
+                    await start_on_cycle(None)
+            elif (
+                self.prop_current_phase == PROP_PHASE_ON
+                and time >= self.prop_end_phase_time
+            ):
+                _LOGGER.debug("Into PHASE_ON")
+                await start_off_cycle(None)
+            elif (
+                self.prop_current_phase == PROP_PHASE_OFF
+                and time >= self.prop_end_phase_time
+                and self._active
+                and self._hvac_mode != HVAC_MODE_OFF
+            ):
+                _LOGGER.debug("Into PHASE_OFF")
+                self.calculate_proportional()
+                if self.prop_on_time_sec > 0:
+                    await start_on_cycle(None)
             else:
-                if (self.ac_mode and too_hot) or (not self.ac_mode and too_cold):
-                    _LOGGER.info("Turning on heater %s", self.heater_entity_id)
-                    await self._async_heater_turn_on()
-                elif time is not None:
-                    # The time argument is passed only in keep-alive case
-                    _LOGGER.info(
-                        "Keep-alive - Turning off heater %s", self.heater_entity_id
-                    )
-                    await self._async_heater_turn_off()
+                _LOGGER.debug(
+                    "Thermostat %s - nothing to do. Waiting %s",
+                    self.name,
+                    self.prop_end_phase_time,
+                )
+
+        await start_cycle(None)
 
     @property
     def _is_device_active(self):
