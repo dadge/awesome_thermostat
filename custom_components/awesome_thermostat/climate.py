@@ -573,7 +573,7 @@ class AwesomeThermostat(ClimateEntity, RestoreEntity):
 
     async def async_set_hvac_mode(self, hvac_mode):
         """Set hvac mode."""
-        _LOGGER.error("Thermostat %s - Set hvac mode: %s", self.name, hvac_mode)
+        _LOGGER.info("Thermostat %s - Set hvac mode: %s", self.name, hvac_mode)
         if hvac_mode == HVAC_MODE_HEAT:
             self._hvac_mode = HVAC_MODE_HEAT
             await self._async_control_heating(force=True)
@@ -889,6 +889,7 @@ class AwesomeThermostat(ClimateEntity, RestoreEntity):
                 )
                 on_percent = 0
         else:
+            _LOGGER.info("Thermostat %s - power is exceeded", self.name)
             on_percent = 0
 
         # calculated on_time duration in seconds
@@ -907,11 +908,13 @@ class AwesomeThermostat(ClimateEntity, RestoreEntity):
             self.prop_on_time_sec = 0
 
         self.prop_off_time_sec = (1.0 - on_percent) * self.prop_cycle_min * 60
-        _LOGGER.debug(
-            "Proportional algorithm: heating percent calculated is %f, on_time is %f (sec), off_time is %s (sec)",
+
+        _LOGGER.info(
+            "Thermostat %s - Proportional algorithm: heating percent calculated is %f, on_time is %f (sec), off_time is %s (sec)
+            self.name,
             on_percent,
             self.prop_on_time_sec,
-            self.prop_off_time_sec,
+            self.prop_off_time_sec
         )
 
     async def _async_control_heating_proportional(self, time, force):
@@ -983,6 +986,12 @@ class AwesomeThermostat(ClimateEntity, RestoreEntity):
 
             time = datetime.now(utc)
 
+            if not self._active or self._hvac_mode == HVAC_MODE_OFF:
+                _LOGGER.info("Thermostat %s - Thermostat is stopped. Stopping radiator", self.name)
+                await self._async_heater_turn_off()
+                self.prop_current_phase = PROP_PHASE_NONE
+                return
+
             if self.prop_current_phase == PROP_PHASE_NONE:
                 _LOGGER.debug("Into PHASE_NONE or force")
                 self.calculate_proportional()
@@ -1002,8 +1011,9 @@ class AwesomeThermostat(ClimateEntity, RestoreEntity):
                 _LOGGER.debug("Into PHASE_ON")
                 await start_off_cycle(None)
             elif (
-                self.prop_current_phase == PROP_PHASE_OFF
-                and time >= self.prop_end_phase_time
+                self.prop_current_phase == PROP_PHASE_NONE or
+                (self.prop_current_phase == PROP_PHASE_OFF
+                and time >= self.prop_end_phase_time)
                 and self._active
                 and self._hvac_mode != HVAC_MODE_OFF
             ):
