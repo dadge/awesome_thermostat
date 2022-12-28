@@ -910,7 +910,7 @@ class AwesomeThermostat(ClimateEntity, RestoreEntity):
         self.prop_off_time_sec = (1.0 - on_percent) * self.prop_cycle_min * 60
 
         _LOGGER.info(
-            "Thermostat %s - Proportional algorithm: heating percent calculated is %f, on_time is %f (sec), off_time is %s (sec)
+            "Thermostat %s - Proportional algorithm: heating percent calculated is %f, on_time is %f (sec), off_time is %s (sec)"
             self.name,
             on_percent,
             self.prop_on_time_sec,
