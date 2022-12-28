@@ -15,7 +15,9 @@ This new component "Awesome thermosts" now manage the awesome use cases :
 - Explicitely define the temperature for presets mode in config file.
 - Unset the preset mode when the temperature is manually defined on a thermostat.
 - Turn off/on a thermostat when a door or windows is opened/closed.
-- Set a  temperature when an activity is detected in a room, and another one after no activity has been detected for a defined time.
+- Set a temperature when an activity is detected in a room, and another one after no activity has been detected for a defined time.
+- Choose the algorithm mode to a simple threshold or more sofisticated proportional one (see below).
+- Add power management to avoid exceeding a defined total power 
 
 ## That's awesome ! How Can I enjoy this awesome thermostat  ?
 
@@ -113,7 +115,7 @@ climate:
     window_sensor: binary_sensor.study_windows
 ```
 And that's it ! your thermostat will turn off when the windows is open and be turned back on when it's closed.
-Note 1 : this implementation is based on 'normal' door/windows behavior, that'smean it considers it's closed when the state is 'off' and open when the state is 'on'
+Note 1 : this implementation is based on 'normal' door/windows behavior, that's mean it considers it's closed when the state is 'off' and open when the state is 'on'
 Note 2 : If you want to use several door/windows sensors to automatize your thermostat, just create a group with the regular behavior (https://www.home-assistant.io/integrations/binary_sensor.group/). 
 
 ### Configure the activity mode
@@ -150,6 +152,106 @@ climate:
       minutes: 5
 ```
 Be aware that as for the others preset modes, Activity will only be proposed if it's correctly configure. In other words, the 4 configurayion keys have to be set if you want to see Activity in home assistant Interface
+
+### Algorithm 
+By default the simple threshold algorithm is used. That mean, if temperature goes beyond or above the target temperature +/- 0.3, then the radiator is started or shutdown. When using this algorithm you will see that the temperature oscillate aroud target temperature but doesn't stabilize.
+To use this algorithm you have configure you thermostat like this:
+
+```yaml
+climate:
+  - platform: awesome_thermostat
+    name: Study
+    heater: switch.study_heater
+    target_sensor: sensor.study_temperature
+    eco_temp: 18.5
+    away_temp: 16
+    boost_temp: 23
+    comfort_temp: 21.5
+    sleep_temp: 20
+
+    algorithm: Threshold
+    cold_tolerance: 0.3
+    hot_tolerance: 0.3
+```
+
+A Proportional algorithm is also available to avoid this oscillation around the target temperature. This algorithm is based on a cycle which alternate heating and stop heating. The proportion of heating vs not heating is determined by the difference between the temperature and the target temperature. Bigger the difference is and bigger is the proportion of heating inside the cycle.
+This algorithm make the temperature converge and stop oscillating.
+
+Depending of your area and heater, the convergente temperature can be under the targeted temperature. So a biais parameter is available to fix this. To find the right value of biais, just set it to 0 (no biais), let the temperature converge and see if it is near the targeted temperature. If not adjust the biais. A good value is 0.25 with my accumulator radiator (which are long to heat but keeps the heat for a long time).
+
+A function parameter is available. Set it to "Linear" to have a linéar growth of temperature or set it to "Atan" to have a more aggressive curve to target temperature depending of your need.
+
+The parameter for this mode are the following:
+
+```yaml
+climate:
+  - platform: awesome_thermostat
+    name: Study
+    heater: switch.study_heater
+    target_sensor: sensor.study_temperature
+    eco_temp: 18.5
+    away_temp: 16
+    boost_temp: 23
+    comfort_temp: 21.5
+    sleep_temp: 20
+
+    algorithm: "Proportional"
+    prop_bias: 0.25
+    prop_function: "Linear"
+    prop_cycle_min: 6
+```
+
+### Power management
+This feature allows you to regulate the power consumption of your radiators. Give a sensor to the current power consumption of your house, a sensor to the max power that should not be exceeded, the power consumption of your radiator and the algorithm will not start a radiator if the max power will be exceeded after radiator starts.
+Example configuration:
+
+```yaml
+climate:
+  - platform: awesome_thermostat
+    name: Study
+    heater: switch.study_heater
+    target_sensor: sensor.study_temperature
+    eco_temp: 18.5
+    away_temp: 16
+    boost_temp: 23
+    comfort_temp: 21.5
+    sleep_temp: 20
+
+    power_sensor: sensor.total_instant_home_power
+    max_power_sensor: input_number.heating_power_max
+    device_power: 1.0
+```
+
+Note that all power values should have the same units (kWh for example).
+This allows you to change the max power along time using a Sceduler or whatever you like.
+
+### Mix all configurations to get an awesome thermostat !
+Example of full configuration:
+
+```yaml
+- name: Thermostat mezzanine
+  platform: awesome_thermostat
+  heater: switch.radiateur_mezzanine
+  target_sensor: sensor.temperature_mezzanine
+  keep_alive:
+      minutes: 5
+  initial_hvac_mode: "off"
+  precision: 0.1
+  eco_temp: 17
+  away_temp: 17
+  boost_temp: 20
+  comfort_temp: 19
+  sleep_temp: 12
+  algorithm: "Proportional"
+  prop_bias: 0.25
+  prop_function: "Atan"
+  prop_cycle_min: 6
+  window_sensor: binary_sensor.window_mezzanine
+  power_sensor: sensor.total_instant_home_power
+  max_power_sensor: input_number.heating_power_max
+  device_power: 1.6
+```
+Enjoy !
 
 ## Even Better with Scheduler Component ! 
 

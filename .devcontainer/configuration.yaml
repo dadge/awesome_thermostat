@@ -10,7 +10,7 @@ debugpy:
 
 input_number:
   fake_temperature_sensor1:
-    name: Temperature 1
+    name: Temperature 1, 5, 6
     min: 0
     max: 35
     step: 1
@@ -33,33 +33,45 @@ input_number:
     max: 35
     step: 1
     icon: mdi:thermometer
+  fake_current_power:
+    name: Current power
+    min: 0
+    max: 1000
+    step: 10
+    icon: mdi:flash
+  fake_current_power_max:
+    name: Current power max threshold
+    min: 0
+    max: 1000
+    step: 10
+    icon: mdi:flash
 
 
 input_boolean:
   # input_boolean to simulate the heater entity switch. Only for development environment.
   fake_heater_switch1:
     name: Heater 1
-    icon: mdi:heater
+    icon: mdi:radiator
   # input_boolean to simulate the heater entity switch. Only for development environment.
   fake_heater_switch2:
     name: Heater 2
-    icon: mdi:heater
+    icon: mdi:radiator
   # input_boolean to simulate the windows entity. Only for development environment.
   fake_window_sensor2:
-    name: Window 2
+    name: Window 2, 5, 6
     icon: mdi:window-closed-variant
   # input_boolean to simulate the heater entity switch. Only for development environment.
   fake_heater_switch3:
     name: Heater 3
-    icon: mdi:heater
+    icon: mdi:radiator
   # input_boolean to simulate the motion sensor entity. Only for development environment.
   fake_motion_sensor3:
-    name: Motion Sensor 3
+    name: Motion Sensor 3, 5, 6
     icon: mdi:run
   # input_boolean to simulate the heater entity switch. Only for development environment.
   fake_heater_switch4:
     name: Heater 4
-    icon: mdi:heater
+    icon: mdi:radiator
   # input_boolean to simulate the windows entity. Only for development environment.
   fake_window_sensor4:
     name: Window 4
@@ -68,9 +80,76 @@ input_boolean:
   fake_motion_sensor4:
     name: Motion Sensor 4
     icon: mdi:run
+  # input_boolean to simulate the heater entity switch. Only for development environment.
+  fake_heater_switch5:
+    name: Prop Heater 5
+    icon: mdi:radiator
+  # input_boolean to simulate the heater entity switch. Only for development environment.
+  fake_heater_switch6:
+    name: Prop Regulated Heater 6
+    icon: mdi:radiator
 
 
 climate:
+  - platform: awesome_thermostat
+    name: "Proportional Thermostat with Power management"
+    heater: input_boolean.fake_heater_switch6
+    target_sensor: input_number.fake_temperature_sensor1
+    motion_sensor: input_boolean.fake_motion_sensor3
+    min_temp: 17
+    max_temp: 25
+    ac_mode: false
+    keep_alive:
+      minutes: 10
+    initial_hvac_mode: "heat"
+    precision: 0.1
+    eco_temp: 18.5
+    away_temp: 16
+    boost_temp: 23
+    comfort_temp: 21.5
+    sleep_temp: 20
+    algorithm: "Proportional"
+    prop_bias: 0.3
+    prop_function: "Linear"
+    prop_cycle_min: 1
+    window_sensor: input_boolean.fake_window_sensor2
+    motion_mode: comfort
+    no_motion_mode: eco
+    motion_delay:
+      seconds: 5
+    power_sensor: input_number.fake_current_power
+    max_power_sensor: input_number.fake_current_power_max
+    device_power: 200
+  - platform: awesome_thermostat
+    name: "Proportional Thermostat"
+    heater: input_boolean.fake_heater_switch5
+    target_sensor: input_number.fake_temperature_sensor1
+    motion_sensor: input_boolean.fake_motion_sensor3
+    min_temp: 17
+    max_temp: 25
+    ac_mode: false
+    # cold_tolerance: 0.3
+    # hot_tolerance: 0.3
+    #min_cycle_duration:
+    #  seconds: 5
+    keep_alive:
+      minutes: 1
+    initial_hvac_mode: "off"
+    precision: 0.1
+    eco_temp: 18.5
+    away_temp: 16
+    boost_temp: 23
+    comfort_temp: 21.5
+    sleep_temp: 20
+    algorithm: "Proportional"
+    prop_bias: 0.3
+    prop_function: "Atan"
+    prop_cycle_min: 1
+    window_sensor: input_boolean.fake_window_sensor2
+    motion_mode: comfort
+    no_motion_mode: eco
+    motion_delay:
+      seconds: 5
   - platform: awesome_thermostat
     name: "AT1"
     heater: input_boolean.fake_heater_switch1
@@ -91,6 +170,9 @@ climate:
     boost_temp: 23
     comfort_temp: 21.5
     sleep_temp: 20
+    power_sensor: input_number.fake_current_power
+    max_power_sensor: input_number.fake_current_power_max
+    device_power: 200
   - platform: awesome_thermostat
     name: "AT2"
     heater: input_boolean.fake_heater_switch2
